@@ -8,6 +8,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.teamcode.Utility.MotionProfile;
 import org.firstinspires.ftc.teamcode.Utility.PIDController;
 import org.firstinspires.ftc.teamcode.Utility.Pose2D;
 import org.firstinspires.ftc.teamcode.Utility.SparkfunLocalizer;
@@ -39,6 +40,10 @@ public class TestBotDrivetrain {
     PIDController yController;
     PIDController headingController;
 
+    MotionProfile xProfile;
+    MotionProfile yProfile;
+    MotionProfile headingProfile;
+
     public boolean targetReached = false;
     Pose2D targetPose;
 
@@ -53,6 +58,8 @@ public class TestBotDrivetrain {
     public static double DRIVE_KD = 0.01;//0.0003;
     public static double DRIVE_MAX_ACC = 2000;
     public static double DRIVE_MAX_VEL = 3500;
+    public static double HEADING_MAX_ACC = 2000;
+    public static double HEADING_MAX_VEL = 3500;
     public static double DRIVE_MAX_OUT = 0.8;
 
     /*
@@ -82,6 +89,8 @@ public class TestBotDrivetrain {
         yController = new PIDController(DRIVE_KP,DRIVE_KI,DRIVE_KD,DRIVE_MAX_OUT);
         headingController = new PIDController(HEADING_KP,HEADING_KI,HEADING_KD,DRIVE_MAX_OUT);
 
+
+
         //TODO Change constructor based on localization system
         //localizer = new PinPointLocalizer(myOpMode);
         localizer = new SparkfunLocalizer(myOpMode);
@@ -91,6 +100,10 @@ public class TestBotDrivetrain {
         //TODO Set the offset of the localizer sensor
         SparkFunOTOS.Pose2D offset = new SparkFunOTOS.Pose2D(5, 0, 0);
         localizer.myOtos.setOffset(offset);
+
+        xProfile = new MotionProfile(DRIVE_MAX_ACC,DRIVE_MAX_VEL, 0);
+        yProfile = new MotionProfile(DRIVE_MAX_ACC,DRIVE_MAX_VEL, 0);
+        headingProfile = new MotionProfile(HEADING_MAX_ACC,HEADING_MAX_VEL,0);
 
         leftFrontDrive = myOpMode.hardwareMap.get(DcMotor.class, "leftFrontDrive");
         rightFrontDrive = myOpMode.hardwareMap.get(DcMotor.class, "rightFrontDrive");
@@ -188,12 +201,24 @@ public class TestBotDrivetrain {
     }
 
     public void update(){
-        /*
-        //Use PIDs to calculate motor powers based on error to targets
-        double xPower = xController.calculate(targetPose.getX(DistanceUnit.INCH), localizer.getX());
-        double yPower = yController.calculate(targetPose.getY(DistanceUnit.INCH), localizer.getY());
+        localizer.update();
+    }
 
-        double wrappedAngleError = angleWrap(targetPose.getHeading(AngleUnit.DEGREES) - localizer.getHeading());
+    public void setTargetPose(Pose2D newTarget){
+        targetPose = newTarget;
+        targetReached = false;\
+    }
+
+    public void driveToPose(double xTarget, double yTarget, double degreeTarget) {
+        targetPose = new Pose2D(DistanceUnit.INCH, xTarget,yTarget,AngleUnit.DEGREES,degreeTarget);
+        //check if drivetrain is still working towards target
+        targetReached = xController.targetReached && yController.targetReached && headingController.targetReached;
+        //double thetaTarget = Math.toRadians(degreeTarget);
+        //Use PIDs to calculate motor powers based on error to targets
+        double xPower = xController.calculate(xTarget, localizer.getX());
+        double yPower = yController.calculate(yTarget, localizer.getY());
+
+        double wrappedAngleError = angleWrap(degreeTarget - localizer.getHeading());
         double tPower = headingController.calculate(wrappedAngleError);
 
         double radianHeading = Math.toRadians(localizer.getHeading());
@@ -208,8 +233,6 @@ public class TestBotDrivetrain {
         rightFrontDrive.setPower(xPower_rotated + yPower_rotated + tPower);
         rightBackDrive.setPower(xPower_rotated - yPower_rotated + tPower);
 
-        //check if drivetrain is still working towards target
-        targetReached = (xController.targetReached && yController.targetReached && headingController.targetReached);
         String data = String.format(Locale.US, "{tX: %.3f, tY: %.3f, tH: %.3f}", targetPose.getX(DistanceUnit.INCH), targetPose.getY(DistanceUnit.INCH), targetPose.getHeading(AngleUnit.DEGREES));
 
         myOpMode.telemetry.addData("Target Position", data);
@@ -217,28 +240,30 @@ public class TestBotDrivetrain {
         myOpMode.telemetry.addData("YReached", yController.targetReached);
         myOpMode.telemetry.addData("HReached", headingController.targetReached);
         myOpMode.telemetry.addData("targetReached", targetReached);
-        myOpMode.telemetry.addData("xPower", xPower);
-        myOpMode.telemetry.addData("xPowerRotated", xPower_rotated);
-
-         */
-        localizer.update();
     }
 
-    public void setTargetPose(Pose2D newTarget){
-        targetPose = newTarget;
-        targetReached = false;
-    }
+    //TODO Account for direction of travel...consider having Motion Profile class have a direction variable and multiply the output by direction
+    public void profiledDriveToPose(double xTarget, double yTarget, double degreeTarget) {
+
+        //check if the target pose is new
+        if(targetPose.getX(DistanceUnit.INCH) != xTarget ||
+            targetPose.getY(DistanceUnit.INCH) != yTarget ||
+                targetPose.getHeading(AngleUnit.DEGREES) != degreeTarget){
+
+            //if target is new, calculate motion profile time and reset timer, and store original distance
+            targetPose = new Pose2D(DistanceUnit.INCH, xTarget,yTarget,AngleUnit.DEGREES,degreeTarget);
+            xProfile = new MotionProfile(DRIVE_MAX_ACC,DRIVE_MAX_VEL,xTarget-localizer.getX());
+            yProfile = new MotionProfile(DRIVE_MAX_ACC,DRIVE_MAX_VEL,yTarget-localizer.getY());
+            headingProfile = new MotionProfile(HEADING_MAX_ACC,HEADING_MAX_VEL,angleWrap(degreeTarget - localizer.getHeading()));
+        }
 
 
-
-    public void driveToPose(double xTarget, double yTarget, double degreeTarget) {
-        targetPose = new Pose2D(DistanceUnit.INCH, xTarget,yTarget,AngleUnit.DEGREES,degreeTarget);
         //check if drivetrain is still working towards target
-        targetReached = xController.targetReached && yController.targetReached && headingController.targetReached;
+        targetReached = xProfile.profileComplete && yProfile.profileComplete && headingProfile.profileComplete;
         //double thetaTarget = Math.toRadians(degreeTarget);
         //Use PIDs to calculate motor powers based on error to targets
-        double xPower = xController.calculate(xTarget, localizer.getX());
-        double yPower = yController.calculate(yTarget, localizer.getY());
+        double xPower = xController.calculate(xProfile.returnInstantTarget(), localizer.getX());
+        double yPower = yController.calculate(yProfile.returnInstantTarget(), localizer.getY());
 
         double wrappedAngleError = angleWrap(degreeTarget - localizer.getHeading());
         double tPower = headingController.calculate(wrappedAngleError);
